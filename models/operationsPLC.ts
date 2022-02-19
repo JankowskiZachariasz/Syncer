@@ -2,6 +2,7 @@ import { Schema, Types, model } from 'mongoose';
 
 export interface operacjeInterface{
   
+        _id?: string;
         name?: string;
         datablock?: any|{ connect: {id: string} };
         operation?: string;

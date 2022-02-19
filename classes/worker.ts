@@ -6,7 +6,10 @@ import { FetchResult } from "@apollo/client";
 import client from "../apollo-client";
 import { gql } from "@apollo/client";
 import {PaczkaResolverSingleton} from './onoToOneResolver';
+import paczka, {paczkaInterface} from '../models/paczka';
+import ProductUtil from './productUtil';
 var nodes7 = require("nodes7");
+var loadedTestData = false;
 
 //constants
 var   API_default:API = {
@@ -36,6 +39,7 @@ export default class Syncer {
   PLCs: Array<PLC> = [];
   connections: Array<connection> = [];
   datablocks: Array<Datablock> = [];
+  pendingOperations: Array<Operation> = [];
 
 
   private generateConnectionAddress(
@@ -178,44 +182,37 @@ export default class Syncer {
       if(currentOperation) try{await this.write(currentConnection);}catch(e){console.log(e);}
       //read all watched variables from the plc
       var variablesToUpdate: Array<localVariable> = await this.read(currentConnection);
-
+      console.log('0/5');
+      var productUiResolver = new ProductUtil();
+      console.log('1/5');
+      await productUiResolver.productsToPaczkasTranslate();
+      console.log('2/5');
       //paczki: (onoToOneResolver)
       await PaczkaResolverSingleton.resolve(currentConnection.plc.variablesToReadOnly);
+      console.log('3/5');
       await PaczkaResolverSingleton.commitChanges();
-      //pobierz paczki z mongo
-      //wygeneruj swoje paczki PLC, na podstawie świeżych zmiennych, które masz <- na tym etapie mamy wielki array wszystkich paczek
-      //porównaj wszystkie ze sobą i wygeneruj:
-      //listę do usunięcia z DB
-      //listę do dodania do DB
-      //listę poleceń PLC
-      //dla wszystkich paczek, które masz w komplecie sprawdź field-level-consistancy i wygeneruj: (omijasz paczki, dla których stworzyłeś polecenia (same się omijajaę))
-      //modyfikacje paczek w DB
-      //modyfikacje paczek w PLC
-      //wyślij wszytsko do Keystona
+      console.log('4/5');
+      await productUiResolver.updateProductsWithPaczkas();
+      console.log('5/5');
+      
 
-
-      //produkty
-
-      //wiadomości (eventBusResolver)
-      //pobierz historyczny stan wiadomości z DB
-      //(10 records should allways be in the db)
-      //wygeneruj nowe stany wiadomości na podstawie zmiennych
-      //jeżeli wykryto zmianę 1->2 lub 2->1:
-      //przepisz takie nowe do starych i robiąc to dodaj nową wiadomość
-      //wgraj zmienione refy i nowe wiadomości do DB
-
-
-
-
-
-
-
-
+      // loadedTestData=true;
+      // if(!loadedTestData){
+      //   var localAdd: Array<any> = [];
+      //   for(var i=4;i<997;i++){
+      //     localAdd.push(
+      //       new paczka({type:'DB_EDIT',name:'Zachi_paczka_'+i,enumerator:('paczka'+i),nrSeryjny1:23,nrSeryjny2:i,nrSeryjny3:2000-i,nrPaczki:1,plcId:i})
+      //       );
+      //   }
+      //   if(localAdd.length>0)
+      //   try{await paczka.insertMany(localAdd)}catch(e){console.log(e);}
+      // }
+      
+      
 
 
       //try to declare operation a success (triggers will either confirm it or not)
-      if(currentOperation)
-      await this.NotifyCommandExecuted(currentOperation);
+      await this.operationProcessor(this.pendingOperations,PaczkaResolverSingleton.PLCcommands);
       //update database with new variables through keystoneJS
       if (variablesToUpdate) {await this.updateDatabase(currentConnection, variablesToUpdate);}
 
@@ -227,6 +224,7 @@ export default class Syncer {
     return new Promise<Operation>(async (resolve, reject) => {
       operacje.find({status:'Pending'}).exec(async (err, retrievedOperations) =>{
         if(err)reject(err);
+        this.pendingOperations = retrievedOperations;
         //building a list of considered datablocks to filter out commands conserning other PLCs
         var consideredDatablockIds: Array<String> = [];
         this.datablocks.forEach(datablock => {
@@ -244,7 +242,7 @@ export default class Syncer {
               oldestOperation=operation;
             }
           });
-          console.log(oldestOperation);
+          //console.log(oldestOperation);
           //choose variable states. Following are some hard-coded responses to command codes
           //first set all controlling variables to their defaults (0 fur numeric vars and '' for Strings)
           var API_commands:API = {};
@@ -386,30 +384,92 @@ export default class Syncer {
     });
   }
 
-  private async NotifyCommandExecuted(operation: Operation):Promise<void>{
+  private async operationProcessor(allInPending:Array<Operation>,newOperations:Array<Operation>):Promise<void>{
     return new Promise<void>(async (resolve, reject) => {
-      var commandId = operation?._id.toString();
+      //check which pending operations didn't appear amoung new ones
+      //and declare them Successful
+      var toDeclareSuccessfull : Array<any> = [];
+      allInPending.forEach(pendingOperation => {
+        var matched = false;
+        for(var i=0;i<newOperations.length;i++){
+          if(pendingOperation.operation==newOperations[i].operation
+            &&pendingOperation.payload==newOperations[i].payload){
+              matched=true;break;
+            }
+        }
+        if(!matched){
+          toDeclareSuccessfull.push({data: {status: "Success"}, id: pendingOperation._id});
+        }
+      });
+
+      if(toDeclareSuccessfull.length>0)
       try{
         let returnedData = await client.mutate({
             mutation: gql`
-                mutation myMutation($data: OperacjePLCUpdateInput, $id: ID!) {
-                  updateOperacjePLC(data: $data, id: $id) {
+                mutation myMutation($data:  [OperacjePLCSUpdateInput]) {
+                  updateOperacjePLCS(data: $data) {
                     id
                     status
                   }
                 }
             `,
             variables: {
-              data: {status: "Success"},
-              id: commandId
+              data: toDeclareSuccessfull
             },
           });
-          resolve();
       }
       catch(e){
           console.log(e.networkError);
           reject(e);
       }
+
+      //if number of pending jobs = 0;
+      //pick the most important task from the list of new jobs
+      //send it to db as pending
+      console.log((allInPending.length-toDeclareSuccessfull.length)<=0)
+      if((allInPending.length-toDeclareSuccessfull.length)<=0){
+        //the order is as follows:
+        //new ones
+        //modifications
+        //deletions
+        var newOpps : Array<Operation> = [];
+        var modOpps : Array<Operation> = [];
+        var delOpps : Array<Operation> = [];
+        newOperations.forEach(operation => {
+          switch(operation?.operation){
+            case('Paczki_CREATE'):{newOpps.push(operation); break;}
+            case('Paczki_UPDATE'):{modOpps.push(operation); break;}
+            case('Paczki_DELETE'):{delOpps.push(operation); break;}
+          }
+        });
+        var toCreate:Operation = [...newOpps,...modOpps,...delOpps][0];
+
+        if(toCreate)
+        try{
+          let returnedData = await client.mutate({
+              mutation: gql`
+                mutation myMutation($data:  OperacjePLCCreateInput) {
+                 createOperacjePLC(data: $data){
+    						id
+  							}
+                }
+              `,
+              variables: {
+                data: toCreate
+              },
+            });
+            
+        }
+        catch(e){
+            console.log(e.networkError);
+            reject(e);
+        }
+        resolve();
+
+      }
+      resolve();
+
+
 
     })
   }
@@ -521,6 +581,6 @@ interface API_Interface {
 
 type API = API_Interface & Object;
 
-export type Operation = Document<any, any, operacjeInterface> & operacjeInterface & {_id: Types.ObjectId;};
+export type Operation = Document<any, any, operacjeInterface> & operacjeInterface & {_id: Types.ObjectId;}|operacjeInterface;
 
 type Datablock = Document<any, any, datablockInterface> & datablockInterface & {_id: Types.ObjectId;}

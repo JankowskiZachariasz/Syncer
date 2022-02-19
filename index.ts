@@ -9,7 +9,7 @@ mongoose.connect(process.env.mongodbConnectionString,{ useUnifiedTopology: true,
     await syncer.retrieveVariablesToSync();
     await syncer.buildConnections(syncer.PLCs);
     
-    setInterval(()=>{syncer.tick();console.log("tick");}, 5000);
+    setInterval(async()=>{console.log("tick");await syncer.tick();console.log("tock");}, 4000);
 });
 
 

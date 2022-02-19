@@ -1,44 +1,53 @@
 import type {operacjeInterface} from '../models/operationsPLC';
 import type {paczkaInterface} from '../models/paczka'
+import type {Operation} from './worker'
 require('dotenv').config()
 
 class ResolverUtil{
 
 
-    generatePaczkaCommandToDeleteFromPLC(toDelete : paczkaInterface):operacjeInterface{
-        var operation :operacjeInterface = {};
+    generatePaczkaCommandToDeleteFromPLC(toDelete : paczkaInterface):Operation{
+        
         var indexToDelete:number = Number.parseInt(toDelete?.enumerator?.substring(6,toDelete?.enumerator?.length));
-        operation.name='PLC_DELETE: '+toDelete.name;
-        operation.datablock={connect:{id:process.env.API_DB_ID}};
-        operation.operation='Paczki_DELETE';
-        operation.payload=JSON.stringify({...toDelete,plcId:indexToDelete});
-        operation.status='Pending';
-        operation.timeSubmitted=Date.now().toString();
+        var operation :Operation = {
+            name: 'PLC_DELETE: '+toDelete.name,
+            datablock: {connect:{id:process.env.API_DB_ID}},
+            operation: 'Paczki_DELETE',
+            payload: JSON.stringify({...toDelete,plcId:indexToDelete}),
+            status: 'Pending',
+            timeSubmitted: Date.now().toString(),
+        };
+        
         return operation;
 
     }
 
-    generatePaczkaCommandToCreateOnPLC(toAdd : paczkaInterface):operacjeInterface{
+    generatePaczkaCommandToCreateOnPLC(toAdd : paczkaInterface):Operation{
+
         toAdd.plcId = Number.parseInt(toAdd.enumerator.substring(6)); 
-        var operation :operacjeInterface = {};
-        operation.name='Paczki_CREATE: '+toAdd.name;
-        operation.datablock={connect:{id:process.env.API_DB_ID}};
-        operation.operation='Paczki_CREATE';
-        operation.payload=JSON.stringify(toAdd);
-        operation.status='Pending';
-        operation.timeSubmitted=Date.now().toString();
+        var operation :Operation = {
+            name: 'Paczki_CREATE: '+toAdd.name,
+            datablock: {connect:{id:process.env.API_DB_ID}},
+            operation: 'Paczki_CREATE',
+            payload: JSON.stringify(toAdd),
+            status: 'Pending',
+            timeSubmitted: Date.now().toString(),
+        };
+
         return operation;
     }
 
-    generatePaczkaCommandToModifyOnPLC(toModify : paczkaInterface):operacjeInterface{
-        var operation : operacjeInterface = {};
+    generatePaczkaCommandToModifyOnPLC(toModify : paczkaInterface):Operation{
         var indexToModify:number = Number.parseInt(toModify?.enumerator?.substring(6,toModify?.enumerator?.length));
-        operation.name='Paczki_UPDATE: '+toModify.name;
-        operation.datablock={connect:{id:process.env.API_DB_ID}};
-        operation.operation='Paczki_UPDATE';
-        operation.payload=JSON.stringify({...toModify,plcId:indexToModify});
-        operation.status='Pending';
-        operation.timeSubmitted=Date.now().toString();
+        var name:string = toModify?.name?(toModify?.name):('');
+        var operation : Operation = {
+            name: 'Paczki_UPDATE: '+toModify.name,
+            datablock: {connect:{id:process.env.API_DB_ID}},
+            operation: 'Paczki_UPDATE',
+            payload: JSON.stringify({...toModify,plcId:indexToModify,name}),
+            status: 'Pending',
+            timeSubmitted: Date.now().toString(),
+        };
         return operation;
     }
 
@@ -55,6 +64,27 @@ class ResolverUtil{
         );
 
         return toReturn;
+    }
+
+    paczkaDeepCopy(source:paczkaInterface):paczkaInterface{
+        var target:paczkaInterface={};
+        var iterable:paczkaInterface = {
+            _id:'',
+            enumerator:'',
+            name:'',
+            type:'',
+            lPaczek:0,
+            nrPaczki:0,
+            nrSeryjny1:0,
+            nrSeryjny2:0,
+            nrSeryjny3:0,
+            plcId:0,
+            dlugosc:0,
+        }
+        Object.keys(iterable).map(fieldKey => {
+            target[fieldKey] = source[fieldKey];
+        });
+        return target;
     }
 
 }

@@ -6,20 +6,20 @@ export interface paczkaInterface{
     enumerator?:string,
     name?:string,
     type?:string,
-    lPaczek?:Number,
-    nrPaczki?:Number,
-    nrSeryjny1?:Number,
-    nrSeryjny2?:Number,
-    nrSeryjny3?:Number,
-    plcId?:Number,
-    dlugosc?:Number,
+    lPaczek?:number,
+    nrPaczki?:number,
+    nrSeryjny1?:number,
+    nrSeryjny2?:number,
+    nrSeryjny3?:number,
+    plcId?:number,
+    dlugosc?:number,
   
   
 };
 
 var paczkaSchema = new Schema<paczkaInterface>({
 
-    enumerator:{type: String , required: false},
+    enumerator:{type: String , required: true},
     name:{type: String , required: false},
     type:{type: String , required: false},
     lPaczek:{type: Number, required: false},

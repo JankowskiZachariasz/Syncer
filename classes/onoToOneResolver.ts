@@ -1,10 +1,9 @@
 import type { Model, Types, Document} from 'mongoose';
 import type {Operation, localVariable} from './worker';
-import type {operacjeInterface} from '../models/operationsPLC';
 import paczka, {paczkaInterface} from '../models/paczka';
-import produkt, {produktInterface} from '../models/produkt';
 import variable, {variableInterface} from '../models/variable';
 import ResolverUtil from './resolverUtil'
+import resolverUtil from './resolverUtil';
 abstract class OnoToOneResolver {
 
     triples : tripleMap = null;
@@ -19,17 +18,16 @@ abstract class OnoToOneResolver {
     toDelete : Array<record>
     toAdd : Array<record>
     toModify : Array<record>
-    PLCcommands : Array<operacjeInterface>
-
+    PLCcommands : Array<Operation>
 
     abstract translateVars(vars: Array<localVariable>):variableDbObject;
     abstract queryRecords():Promise<{DB_REF: Array<record>, DB_EDIT: Array<record>}>;//this fills up DB_REF and DB_EDIT arrays
     abstract processVariables(vars: variableDbObject):Array<record>;//this turns variables into PLC array
     abstract deriveTriples(DB_REF: Array<record>, DB_EDIT: Array<record>, PLC: Array<record>):tripleMap;
     abstract enforceRecordLevelConsistancy(vars: tripleMap)
-    :{doDelete: Array<record>, toAdd: Array<record>, commands : Array<operacjeInterface>};//compares triples and generates doDelete, toAdd, PLCcommands
+    :{doDelete: Array<record>, toAdd: Array<record>, commands : Array<Operation>};//compares triples and generates doDelete, toAdd, PLCcommands
     abstract enforceFieldLevelConsistancy(vars: tripleMap)
-    :{toModify: Array<record>, commands : Array<operacjeInterface>};//compares triples and generates toModify, PLCcommands
+    :{toModify: Array<record>, commands : Array<Operation>};//compares triples and generates toModify, PLCcommands
     
     async resolve(freshVariables:Array<localVariable>):Promise<void>{
         return new Promise<void>(async (resolve, reject) => {         
@@ -40,6 +38,7 @@ abstract class OnoToOneResolver {
                 this.DB_EDIT = dbRecords.DB_EDIT;
                 this.PLC = this.processVariables(this.variableMap);
                 this.triples = this.deriveTriples(this.DB_REF,this.DB_EDIT,this.PLC);
+                //console.log(this.triples);
                 this.PLCcommands = [];
                 var recordLevelChanges = this.enforceRecordLevelConsistancy(this.triples);
                 this.toDelete = recordLevelChanges.doDelete;
@@ -48,8 +47,13 @@ abstract class OnoToOneResolver {
                 var fieldLevelChanges = this.enforceFieldLevelConsistancy(this.triples);
                 this.toModify = fieldLevelChanges.toModify;
                 this.PLCcommands.push(...fieldLevelChanges.commands);
-                // console.log(this.toModify);
-                // console.log(this.PLCcommands);
+                //console.log(this.PLCcommands);
+                // console.log(this.toDelete);
+                // console.log(this.toAdd);
+                //console.log(this.toModify);
+                // console.log('Czemu tego nie widać?');
+                // //console.log(this.PLCcommands);
+                // console.log('Hmmmmm??');
                 resolve();
             }
             catch(e){reject(e);}
@@ -147,17 +151,17 @@ class PaczkaResolver extends OnoToOneResolver{
     }
 
     enforceRecordLevelConsistancy(vars: tripleMap):
-     { doDelete: paczkaRecord[]; toAdd: paczkaRecord[]; commands: operacjeInterface[]; } {
+     { doDelete: paczkaRecord[]; toAdd: paczkaRecord[]; commands: Operation[]; } {
         var doDelete: paczkaRecord[]=[];
         var toAdd: paczkaRecord[]=[];
-        var commands: operacjeInterface[]=[];
+        var commands: Operation[]=[];
         
         Object.keys(vars).map(async key => {
             var A :number = vars[key][0]!=null?1:0;
             var B :number = vars[key][1]!=null?1:0;
             var C :number = vars[key][2]!=null?1:0;
             var product:number = (A*4)+(B*2)+(C*1);
-            console.log(product);
+            
             switch(product){
                 case(0):{break;}//stable
                 case(1):{toAdd.push({...vars[key][2],type:'DB_EDIT'}); break;}//L2=L3
@@ -168,7 +172,7 @@ class PaczkaResolver extends OnoToOneResolver{
                 case(6):{doDelete.push(vars[key][1]); break;}//delete L2
                 case(7):{break;}//stable
             }
-        })
+        });
 
 
         return({doDelete,toAdd,commands});
@@ -176,14 +180,12 @@ class PaczkaResolver extends OnoToOneResolver{
     }
 
     enforceFieldLevelConsistancy(vars: tripleMap):
-     { toModify: paczkaRecord[]; commands: operacjeInterface[]; } {
-         var toReturn:{ toModify: paczkaRecord[]; commands: operacjeInterface[]; } = {toModify:[],commands:[]};
+     { toModify: paczkaInterface[]; commands: Operation[]; } {
+         var toReturn:{ toModify: paczkaInterface[]; commands: Operation[]; } = {toModify:[],commands:[]};
         Object.keys(vars).map( key => {
         if(vars[key][0]!=null && vars[key][1]!=null && vars[key][2]!=null){//must be stable
             var iterable:paczkaInterface = {
-                enumerator:'',
                 name:'',
-                type:'',
                 lPaczek:0,
                 nrPaczki:0,
                 nrSeryjny1:0,
@@ -192,15 +194,15 @@ class PaczkaResolver extends OnoToOneResolver{
                 plcId:0,
                 dlugosc:0,
             }
-            var temp1:paczkaInterface = {}; Object.assign(temp1, vars[key][0]);
-            var temp2:paczkaInterface = {}; Object.assign(temp2, vars[key][1]);
-            var temp3:paczkaInterface = {}; Object.assign(temp3, vars[key][2]);
+            const temp1:paczkaInterface = resolverUtil.paczkaDeepCopy(vars[key][0]);
+            const temp2:paczkaInterface = resolverUtil.paczkaDeepCopy(vars[key][1]);
+            const temp3:paczkaInterface = resolverUtil.paczkaDeepCopy(vars[key][2]);
             
             var currentTripple:Array<paczkaInterface>=[temp1,temp2,temp3];
-            Object.keys(iterable).map(async fieldKey => {
-                var L1 :any = vars[key][0][fieldKey];
-                var L2 :any = vars[key][1][fieldKey];
-                var L3 :any = vars[key][2][fieldKey];
+            Object.keys(iterable).map(fieldKey => {
+                var L1 :any = (vars[key][0][fieldKey]==null||vars[key][0][fieldKey]=='')?("0"):(vars[key][0][fieldKey]?.toString()?.substring(0,15));
+                var L2 :any = (vars[key][1][fieldKey]==null||vars[key][1][fieldKey]=='')?("0"):(vars[key][1][fieldKey]?.toString()?.substring(0,15));
+                var L3 :any = (vars[key][2][fieldKey]==null||vars[key][2][fieldKey]=='')?("0"):(vars[key][2][fieldKey]?.toString()?.substring(0,15));
                 if(!(L1==L2&&L2==L3)){
                     if((L1==L2)&&(L1!=L3)&&(L2!=L3)){// AAB -> A=B
                         console.log('AAB -> A=B');
@@ -213,23 +215,25 @@ class PaczkaResolver extends OnoToOneResolver{
                     }
                     else if((L1==L3)&&(L1!=L2)&&(L3!=L2)){// BAB -> B=A
                         console.log('BAB -> B=A');
+                        
                         //currentTripple[0][fieldKey]=currentTripple[1][fieldKey];
                         currentTripple[2][fieldKey]=currentTripple[1][fieldKey];
                     }
                     else if((L1!=L3)&&(L1!=L2)&&(L3!=L2)){// ABC -> B=C
-                        console.log('BAB -> B=A');
+                        console.log('ABC -> B=C ');
                         //currentTripple[0][fieldKey]=currentTripple[1][fieldKey];
                         currentTripple[1][fieldKey]=currentTripple[2][fieldKey];
                     }
                 } 
             });
             if(!ResolverUtil.comparePaczkas(vars[key][0], currentTripple[0])){
-                toReturn.toModify.push({...currentTripple[0]});
+                toReturn.toModify.push(currentTripple[0]);
             }
             if(!ResolverUtil.comparePaczkas(vars[key][1], currentTripple[1])){
-                toReturn.toModify.push({...currentTripple[1]});
+                toReturn.toModify.push(currentTripple[1]);
             }
             if(!ResolverUtil.comparePaczkas(vars[key][2], currentTripple[2])){
+                //console.log('got here!');
                 toReturn.commands.push(ResolverUtil.generatePaczkaCommandToModifyOnPLC(currentTripple[2]));
             }
 
@@ -243,12 +247,30 @@ class PaczkaResolver extends OnoToOneResolver{
             //delete
             var localDelete: Array<string> = [];
             this.toDelete.forEach(toDelete => {
-                // localDelete.push(toDelete.);
-                console.log(toDelete);
+                localDelete.push(toDelete._id);
             });
-            localDelete
+            if(localDelete.length>0)
+            try{await paczka.deleteMany({_id: {$in:localDelete}})}catch(e){console.log(e);}
+            
             //add
+            var localAdd: Array<any> = [];
+            this.toAdd.forEach(toAdd =>{
+                delete toAdd._id;
+                localAdd.push(
+                    new paczka({...toAdd})
+                );
+            });
+            if(localAdd.length>0)
+            try{await paczka.insertMany(localAdd)}catch(e){console.log(e);}
+
             //modify
+            await Promise.all(this.toModify.map(async toModify =>{
+                var currentId = toModify._id;
+                delete toModify._id;
+                
+                try{await paczka.updateOne({_id: currentId},{...toModify})}catch(e){console.log(e);}      
+            })).then(()=>{resolve();});
+            
             
         });
     }
@@ -263,8 +285,7 @@ type tripleMap = { [key: string]: paczkaInterface[] };//0-ref,1-edit,2-incurred
 type variableDbObject = { [key: string]: variableInterface };
 
 export type paczkaRecord = (Document<any, any, paczkaInterface> & paczkaInterface & { _id: Types.ObjectId })|paczkaInterface;
-type produktRecord = Document<any, any, produktInterface> & produktInterface & { _id: Types.ObjectId };
 
-type record = paczkaInterface | produktInterface;
+export type record = paczkaInterface;
 
 export var PaczkaResolverSingleton = new PaczkaResolver();
